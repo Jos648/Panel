@@ -5,7 +5,7 @@
 export const CONFIG = {
   // GitHub → Settings → Developer settings → OAuth Apps → New OAuth App
   // ile oluşturduğun uygulamanın Client ID'si (secret GEREKMEZ, device flow kullanıyoruz).
-  GITHUB_CLIENT_ID: 'GITHUB_CLIENT_ID_BURAYA',
+  GITHUB_CLIENT_ID: 'Ov23lis1Hy01nazMrOxC',
 
   // Tarayıcı github.com/login/oauth/* isteklerini CORS nedeniyle engellerse
   // kendi küçük proxy'ni (örn. https://proxy.example.com → github.com/login/oauth/) buraya yaz.
