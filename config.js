@@ -9,7 +9,7 @@ export const CONFIG = {
 
   // Tarayıcı github.com/login/oauth/* isteklerini CORS nedeniyle engellerse
   // kendi küçük proxy'ni (örn. https://proxy.example.com → github.com/login/oauth/) buraya yaz.
-  OAUTH_PROXY: null,
+  OAUTH_PROXY: 'https://panel.yusidlenos.workers.dev',
 
   SCOPES: 'repo', // özel repolar için gerekli
 
