@@ -9,14 +9,29 @@ import { getUser } from './github-api.js';
  * - Şifre asla uygulamaya gelmez; kullanıcı github.com'da onaylar.
  * - Token yalnızca sessionStorage'da tutulur: sekme kapanınca silinir,
  *   başka sekmeye/log'a/hata mesajına asla yazılmaz.
+ *
+ * ✅ FIX: GitHub'ın gerçek endpoint yolları farklı:
+ *    - device code isteği: https://github.com/login/device/code   (oauth/ YOK)
+ *    - access token isteği: https://github.com/login/oauth/access_token (oauth/ VAR)
+ *    Önceden ikisi de yanlışlıkla /oauth/ öneki ile kuruluyordu, bu da
+ *    device/code isteğinin var olmayan bir adrese gitmesine ve GitHub'ın
+ *    JSON yerine genel bir hata sayfası döndürmesine sebep oluyordu.
  */
 const TOKEN_KEY = 'devdeck.token';
 const GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
 
-const oauthUrl = (path) =>
-  CONFIG.OAUTH_PROXY
+// ✅ FIX: path'e göre doğru GitHub tabanını seç
+const GITHUB_PATHS = {
+  'device/code': 'login/device/code',
+  'access_token': 'login/oauth/access_token',
+};
+
+const oauthUrl = (path) => {
+  const githubPath = GITHUB_PATHS[path] || ('login/oauth/' + path);
+  return CONFIG.OAUTH_PROXY
     ? CONFIG.OAUTH_PROXY.replace(/\/$/, '') + '/' + path
-    : 'https://github.com/login/oauth/' + path;
+    : 'https://github.com/' + githubPath;
+};
 
 async function postForm(path, params) {
   let res;
