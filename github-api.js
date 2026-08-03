@@ -140,7 +140,9 @@ export async function pushChanges({ repo, branch, changes, message, onPhase, onF
   onPhase?.('ref');
   let baseCommit = null;
   try {
-    const ref = await apiWithRetry(`/repos/${full}/git/ref/heads/${branch}`);
+    // NOTE: GitHub API expects the GET reference endpoint at /git/refs/heads/:branch
+    // (refs plural). Using the correct path avoids subtle 404/redirect issues.
+    const ref = await apiWithRetry(`/repos/${full}/git/refs/heads/${branch}`);
     baseCommit = ref.object.sha;
   } catch (e) {
     if (e.status !== 404 && e.status !== 409) throw e; // boş repo → ilk commit
@@ -183,8 +185,7 @@ export async function pushChanges({ repo, branch, changes, message, onPhase, onF
 
   onPhase?.('push');
   if (baseCommit) {
-    // ✅ mevcut branch güncelleniyor (GitHub API: update = /git/refs/... çoğul,
-    //    get = /git/ref/... tekil — ikisi farklı endpoint, karıştırılmamalı)
+    // ✅ mevcut branch güncelleniyor (GitHub API: update = PATCH /git/refs/:ref)
     await apiWithRetry(`/repos/${full}/git/refs/heads/${branch}`, {
       method: 'PATCH', body: { sha: commit.sha, force: false },
     });
