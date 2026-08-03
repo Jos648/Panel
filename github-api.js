@@ -183,8 +183,9 @@ export async function pushChanges({ repo, branch, changes, message, onPhase, onF
 
   onPhase?.('push');
   if (baseCommit) {
-    // ✅ mevcut branch güncelleniyor
-    await apiWithRetry(`/repos/${full}/git/ref/heads/${branch}`, {
+    // ✅ mevcut branch güncelleniyor (GitHub API: update = /git/refs/... çoğul,
+    //    get = /git/ref/... tekil — ikisi farklı endpoint, karıştırılmamalı)
+    await apiWithRetry(`/repos/${full}/git/refs/heads/${branch}`, {
       method: 'PATCH', body: { sha: commit.sha, force: false },
     });
   } else {
