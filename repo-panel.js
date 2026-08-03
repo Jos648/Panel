@@ -10,7 +10,7 @@ let loading = false;
 
 export function initRepoPanel() {
   bus.on('auth', (connected) => {
-    if (connected) loadRepos();
+    if (connected) { render(); loadRepos(); }
     else { store.set({ repos: [] }); render(); }
   });
   bus.on('repo', render);

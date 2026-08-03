@@ -29,6 +29,7 @@ export function initFilesPanel() {
   $('#btn-reanalyze').addEventListener('click', runDiff);
 
   bus.on('tree', runDiff);          // repo ağacı gelince mevcut dosyaları analiz et
+  bus.on('repo', render);
   bus.on('entries', render);
   bus.on('diff', render);
   bus.on('auth', (ok) => { if (!ok) clearAll(true); });
