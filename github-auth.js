@@ -7,8 +7,9 @@ import { getUser } from './github-api.js';
 /**
  * GitHub OAuth 2.0 Device Flow.
  * - Şifre asla uygulamaya gelmez; kullanıcı github.com'da onaylar.
- * - Token yalnızca sessionStorage'da tutulur: sekme kapanınca silinir,
- *   başka sekmeye/log'a/hata mesajına asla yazılmaz.
+ * - Token localStorage'da tutulur: tarayıcı/sekme kapansa da kalıcıdır,
+ *   yalnızca kullanıcı çıkış yapınca ya da elle temizleyince silinir.
+ *   (Not: log'a/hata mesajına asla yazılmaz.)
  *
  * ✅ FIX: GitHub'ın gerçek endpoint yolları farklı:
  *    - device code isteği: https://github.com/login/device/code   (oauth/ YOK)
@@ -90,7 +91,7 @@ export async function pollForToken(deviceCode, intervalSec, signal) {
 }
 
 export async function completeLogin(token) {
-  sessionStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(TOKEN_KEY, token);
   store.set({ token });
   const user = await getUser();
   store.set({ user });
@@ -99,19 +100,21 @@ export async function completeLogin(token) {
 }
 
 export function logout() {
-  sessionStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+  store.set({ token: null, user: null });
+  bus.emit('auth', false);
 }
 
-/** Sayfa yenilendiyse aynı sekmedeki token'ı doğrulayıp geri yükle. */
+/** Sayfa/tarayıcı yeniden açıldığında kaydedilmiş token'ı doğrulayıp geri yükle. */
 export async function restoreSession() {
-  const token = sessionStorage.getItem(TOKEN_KEY);
+  const token = localStorage.getItem(TOKEN_KEY);
   if (!token) return false;
   store.set({ token });
   try {
     store.set({ user: await getUser() });
     return true;
   } catch {
-    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
     store.set({ token: null });
     return false;
   }
