@@ -36,6 +36,20 @@ export function isJunk(path) {
     JUNK.has(s) || s === '__macosx' || s.startsWith('._'));
 }
 
+/**
+ * Upload için uygunluk kontrolü.
+ * - Yollarda segment olarak ".git" geçiyorsa REDDİLİR (Git Data API güvenlik kısıtlaması).
+ * - node_modules gibi gönderilmemesi gereken büyük dizinler de reddedilir.
+ */
+export function isUploadable(p) {
+  if (typeof p !== 'string' || !p) return false;
+  // normalize path separators, boş segmentleri çıkar
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
+  if (parts.includes('.git')) return false;
+  if (parts.includes('node_modules')) return false;
+  return true;
+}
+
 const SUPPORTED = { zip: 'zip', rar: 'rar', '7z': '7z' };
 const KNOWN_UNSUPPORTED = new Set(['tar', 'gz', 'tgz', 'bz2', 'xz', 'zst', 'iso', 'cab', 'lzh', 'arj']);
 

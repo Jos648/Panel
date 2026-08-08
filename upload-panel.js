@@ -6,6 +6,7 @@ import { CONFIG } from './config.js';
 import { pushChanges } from './github-api.js';
 import { summarize } from './diff.js';
 import { fmtBytes } from './format.js';
+import { isUploadable } from './file-guard.js';
 
 const PHASES = {
   ref: 'Commit referansı okunuyor…',
@@ -133,20 +134,28 @@ async function startUpload() {
   const list = changes();
   if (!list.length || !repo || store.state.uploading) return;
 
+  // filtre: .git ve node_modules içeren yolları yüklemeye alma
+  const uploadList = list.filter(c => isUploadable(c.path));
+
   store.set({ uploading: true, lastCommit: null });
   render();
-  const ui = prepareProgress(list);
-  const newCount = list.filter(c => c.status === 'new').length;
-  const message = 'DevDeck V1: ' + newCount + ' yeni, ' + (list.length - newCount) + ' güncellenen dosya';
+  const ui = prepareProgress(uploadList);
+  const newCount = uploadList.filter(c => c.status === 'new').length;
+  const message = 'DevDeck V1: ' + newCount + ' yeni, ' + (uploadList.length - newCount) + ' güncellenen dosya';
 
   ui.log('▸ Hedef: ' + repo.full_name + ' @ ' + repo.default_branch);
-  ui.log('▸ ' + list.length + ' dosya (' + fmtBytes(list.reduce((s, e) => s + e.size, 0)) + ')');
+  ui.log('▸ ' + uploadList.length + ' dosya (' + fmtBytes(uploadList.reduce((s, e) => s + e.size, 0)) + ')');
+
+  if (uploadList.length !== list.length) {
+    const skipped = list.length - uploadList.length;
+    ui.log('· ' + skipped + ' dosya atlandı (".git" veya "node_modules" içeriyor)', 'warn');
+  }
 
   try {
     const result = await pushChanges({
       repo,
       branch: repo.default_branch,
-      changes: list,
+      changes: uploadList,
       message,
       onPhase: (p) => { ui.phase(p); ui.log('· ' + (PHASES[p] ?? p)); },
       onFile: (idx, st) => ui.file(idx, st),
@@ -155,7 +164,7 @@ async function startUpload() {
     // Yeni blob SHA'lerini uzak ağaca işle → sonraki analiz "değişmedi" üretir
     const tree = store.state.remoteTree ?? new Map();
     for (const s of result.shas) tree.set(s.path, s.sha);
-    for (const c of list) c.status = 'same';
+    for (const c of uploadList) c.status = 'same';
     store.set({
       remoteTree: tree,
       diff: summarize(store.state.entries),
@@ -166,7 +175,7 @@ async function startUpload() {
     ui.phase('Tamamlandı ✓');
     ui.log('✓ Commit oluşturuldu: ' + result.commit.sha.slice(0, 10), 'ok');
     ui.banner(true,
-      'Yükleme başarılı — <b>' + list.length + ' dosya</b> gönderildi. ' +
+      'Yükleme başarılı — <b>' + uploadList.length + ' dosya</b> gönderildi. ' +
       '<a href="' + result.commit.url + '" target="_blank" rel="noopener">Commit’i GitHub’da aç ↗</a>');
     toast('Yükleme tamamlandı.', 'ok');
     bus.emit('diff', store.state.diff);
@@ -179,3 +188,4 @@ async function startUpload() {
     render();
   }
 }
+
