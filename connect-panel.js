@@ -105,6 +105,7 @@ function unlink() {
   bus.emit('auth', false);
   bus.emit('repo', null);
   bus.emit('entries', []);
-  toast('Hesap kaldırıldı; token bu sekmeden silindi.', 'info');
+  toast('Hesap kaldırıldı; token bu cihazdan tamamen silindi.', 'info');
   render();
 }
+
