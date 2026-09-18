@@ -1,121 +1,76 @@
+/**
+ * DevDeck V1 — GitHub Device Flow (frontend tarafı)
+ * worker.js'deki path'lerle (/login/device/code, /login/oauth/access_token)
+ * BİREBİR eşleşmek zorunda. Kendi kodunda path farklıysa hata buradan çıkar.
+ */
+
 import { CONFIG } from './config.js';
-import { store } from './store.js';
-import { bus } from './event-bus.js';
-import { sleep } from './async.js';
-import { getUser } from './github-api.js';
+
+async function startDeviceFlow() {
+  const res = await fetch(`${CONFIG.OAUTH_PROXY}/login/device/code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_id: CONFIG.GITHUB_CLIENT_ID,
+      scope: CONFIG.SCOPES,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Device code isteği başarısız: HTTP ${res.status}`);
+  }
+
+  // data: { device_code, user_code, verification_uri, expires_in, interval }
+  return res.json();
+}
+
+async function pollForToken(deviceCode, initialInterval = 5) {
+  let interval = initialInterval;
+
+  while (true) {
+    await new Promise((r) => setTimeout(r, interval * 1000));
+
+    const res = await fetch(`${CONFIG.OAUTH_PROXY}/login/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: CONFIG.GITHUB_CLIENT_ID,
+        device_code: deviceCode,
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      }),
+    });
+
+    const data = await res.json();
+
+    if (data.access_token) {
+      return data.access_token;
+    }
+
+    if (data.error === 'authorization_pending') continue;
+    if (data.error === 'slow_down') {
+      interval += 5;
+      continue;
+    }
+    if (data.error) {
+      throw new Error(`GitHub hata döndü: ${data.error} — ${data.error_description ?? ''}`);
+    }
+  }
+}
 
 /**
- * GitHub OAuth 2.0 Device Flow.
- * - Şifre asla uygulamaya gelmez; kullanıcı github.com'da onaylar.
- * - Token localStorage'da tutulur: tarayıcı/sekme kapansa da kalıcıdır,
- *   yalnızca kullanıcı çıkış yapınca ya da elle temizleyince silinir.
- *   (Not: log'a/hata mesajına asla yazılmaz.)
- *
- * ✅ FIX: GitHub'ın gerçek endpoint yolları farklı:
- *    - device code isteği: https://github.com/login/device/code   (oauth/ YOK)
- *    - access token isteği: https://github.com/login/oauth/access_token (oauth/ VAR)
- *    Önceden ikisi de yanlışlıkla /oauth/ öneki ile kuruluyordu, bu da
- *    device/code isteğinin var olmayan bir adrese gitmesine ve GitHub'ın
- *    JSON yerine genel bir hata sayfası döndürmesine sebep oluyordu.
+ * Kullanım:
+ *   const { user_code, verification_uri } = await loginWithGitHub(showCodeToUser);
+ * showCodeToUser callback'i, kullanıcıya user_code + verification_uri'yi
+ * gösterip token gelene kadar UI'yı bekletmen için.
  */
-const TOKEN_KEY = 'devdeck.token';
-const GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
+export async function loginWithGitHub(onCodeReady) {
+  const { device_code, user_code, verification_uri, interval } = await startDeviceFlow();
 
-// ✅ FIX: path'e göre doğru GitHub tabanını seç
-const GITHUB_PATHS = {
-  'device/code': 'login/device/code',
-  'access_token': 'login/oauth/access_token',
-};
-
-const oauthUrl = (path) => {
-  const githubPath = GITHUB_PATHS[path] || ('login/oauth/' + path);
-  return CONFIG.OAUTH_PROXY
-    ? CONFIG.OAUTH_PROXY.replace(/\/$/, '') + '/' + path
-    : 'https://github.com/' + githubPath;
-};
-
-async function postForm(path, params) {
-  let res;
-  try {
-    res = await fetch(oauthUrl(path), {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: new URLSearchParams(params),
-    });
-  } catch {
-    throw new Error('GitHub OAuth servisine ulaşılamadı. Tarayıcı CORS engeli olabilir — config.js içindeki OAUTH_PROXY alanına bakın.');
+  if (typeof onCodeReady === 'function') {
+    onCodeReady({ user_code, verification_uri });
   }
-  return res.json().catch(() => ({}));
+
+  const token = await pollForToken(device_code, interval);
+  return token;
 }
 
-function translate(code) {
-  return ({
-    bad_verification_code: 'Doğrulama kodu geçersiz.',
-    expired_token: 'Onay süresi doldu.',
-    access_denied: 'Yetkilendirme reddedildi.',
-    incorrect_client_credentials: 'Client ID hatalı — config.js kontrol edin.',
-    unauthorized_client: 'Bu uygulama device flow için yetkisiz.',
-  })[code] ?? '';
-}
-
-/** 1. adım: device_code + kullanıcı kodu al. */
-export async function startDeviceFlow() {
-  const data = await postForm('device/code', {
-    client_id: CONFIG.GITHUB_CLIENT_ID,
-    scope: CONFIG.SCOPES,
-  });
-  if (data.error || !data.device_code)
-    throw new Error(translate(data.error) || 'Device flow başlatılamadı. GITHUB_CLIENT_ID değerini kontrol edin.');
-  return data; // {device_code, user_code, verification_uri, interval, expires_in}
-}
-
-/** 2. adım: kullanıcı onaylayana kadar spec'e uygun aralıklarla poll et. */
-export async function pollForToken(deviceCode, intervalSec, signal) {
-  let wait = Math.max(5, intervalSec || 5) * 1000;
-  const deadline = Date.now() + 890_000;
-  while (Date.now() < deadline) {
-    await sleep(wait, signal);
-    const data = await postForm('access_token', {
-      client_id: CONFIG.GITHUB_CLIENT_ID,
-      device_code: deviceCode,
-      grant_type: GRANT,
-    });
-    if (data.access_token) return data.access_token;
-    if (data.error === 'authorization_pending') continue;
-    if (data.error === 'slow_down') { wait += 5000; continue; } // spec: intervalı uzat
-    if (data.error === 'expired_token') throw new Error('Onay penceresi kapandı. Yeniden başlatın.');
-    if (data.error === 'access_denied') throw new Error('Yetkilendirme reddedildi.');
-    if (data.error) throw new Error(translate(data.error));
-  }
-  throw new Error('Onay süresi doldu.');
-}
-
-export async function completeLogin(token) {
-  localStorage.setItem(TOKEN_KEY, token);
-  store.set({ token });
-  const user = await getUser();
-  store.set({ user });
-  bus.emit('auth', true);
-  return user;
-}
-
-export function logout() {
-  localStorage.removeItem(TOKEN_KEY);
-  store.set({ token: null, user: null });
-  bus.emit('auth', false);
-}
-
-/** Sayfa/tarayıcı yeniden açıldığında kaydedilmiş token'ı doğrulayıp geri yükle. */
-export async function restoreSession() {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (!token) return false;
-  store.set({ token });
-  try {
-    store.set({ user: await getUser() });
-    return true;
-  } catch {
-    localStorage.removeItem(TOKEN_KEY);
-    store.set({ token: null });
-    return false;
-  }
-}
