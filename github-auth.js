@@ -5,8 +5,12 @@
  */
 
 import { CONFIG } from './config.js';
+import { store } from './store.js';
+import { getUser } from './github-api.js';
 
-async function startDeviceFlow() {
+const TOKEN_KEY = 'devdeck.token';
+
+export async function startDeviceFlow() {
   const res = await fetch(`${CONFIG.OAUTH_PROXY}/login/device/code`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -20,15 +24,28 @@ async function startDeviceFlow() {
     throw new Error(`Device code isteği başarısız: HTTP ${res.status}`);
   }
 
-  // data: { device_code, user_code, verification_uri, expires_in, interval }
   return res.json();
 }
 
-async function pollForToken(deviceCode, initialInterval = 5) {
+export async function pollForToken(deviceCode, initialInterval = 5, signal) {
   let interval = initialInterval;
 
   while (true) {
-    await new Promise((r) => setTimeout(r, interval * 1000));
+    if (signal?.aborted) {
+      const err = new Error('Bağlantı akışı iptal edildi.');
+      err.name = 'AbortError';
+      throw err;
+    }
+
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(resolve, interval * 1000);
+      signal?.addEventListener('abort', () => {
+        clearTimeout(t);
+        const err = new Error('Bağlantı akışı iptal edildi.');
+        err.name = 'AbortError';
+        reject(err);
+      }, { once: true });
+    });
 
     const res = await fetch(`${CONFIG.OAUTH_PROXY}/login/oauth/access_token`, {
       method: 'POST',
@@ -38,6 +55,7 @@ async function pollForToken(deviceCode, initialInterval = 5) {
         device_code: deviceCode,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
       }),
+      signal,
     });
 
     const data = await res.json();
@@ -57,12 +75,34 @@ async function pollForToken(deviceCode, initialInterval = 5) {
   }
 }
 
-/**
- * Kullanım:
- *   const { user_code, verification_uri } = await loginWithGitHub(showCodeToUser);
- * showCodeToUser callback'i, kullanıcıya user_code + verification_uri'yi
- * gösterip token gelene kadar UI'yı bekletmen için.
- */
+export async function completeLogin(token) {
+  store.set({ token });
+  sessionStorage.setItem(TOKEN_KEY, token);
+  const user = await getUser();
+  store.set({ user });
+  return user;
+}
+
+export async function restoreSession() {
+  const token = sessionStorage.getItem(TOKEN_KEY);
+  if (!token) return false;
+
+  store.set({ token });
+  try {
+    const user = await getUser();
+    store.set({ user });
+    return true;
+  } catch {
+    sessionStorage.removeItem(TOKEN_KEY);
+    store.set({ token: null, user: null });
+    return false;
+  }
+}
+
+export function logout() {
+  sessionStorage.removeItem(TOKEN_KEY);
+}
+
 export async function loginWithGitHub(onCodeReady) {
   const { device_code, user_code, verification_uri, interval } = await startDeviceFlow();
 
@@ -73,4 +113,3 @@ export async function loginWithGitHub(onCodeReady) {
   const token = await pollForToken(device_code, interval);
   return token;
 }
-
